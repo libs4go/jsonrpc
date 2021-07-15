@@ -63,6 +63,13 @@ func ClientTransport(transport Transport) ClientOpt {
 	}
 }
 
+// ServerContext set server context
+func ClientContext(ctx context.Context) ClientOpt {
+	return func(client *Client) {
+		client.ctx = ctx
+	}
+}
+
 // ClientTimeout set client timeout
 func ClientTimeout(duration time.Duration) ClientOpt {
 	return func(client *Client) {
@@ -70,26 +77,43 @@ func ClientTimeout(duration time.Duration) ClientOpt {
 	}
 }
 
-func newClient(ctx context.Context, options ...ClientOpt) *Client {
+func clientNullCheck(client *Client) error {
+	if client.Transport == nil {
+		return errors.Wrap(ErrTransport, "expect transport ops")
+	}
 
-	newCtx, cancelF := context.WithCancel(ctx)
+	if client.ctx == nil {
+		client.ctx = context.Background()
+	}
+
+	return nil
+}
+
+func newClient(options ...ClientOpt) (*Client, error) {
 
 	client := &Client{
 		Logger:  slf4go.Get("jsonrpc"),
 		waitQ:   make(map[uint]chan *RPCResponse),
 		timeout: time.Second * 60,
 		seq:     1,
-		cancelF: cancelF,
-		ctx:     newCtx,
 	}
 
 	for _, opt := range options {
 		opt(client)
 	}
 
+	if err := clientNullCheck(client); err != nil {
+		return nil, err
+	}
+
+	newCtx, cancelF := context.WithCancel(client.ctx)
+
+	client.ctx = newCtx
+	client.cancelF = cancelF
+
 	go client.runLoop()
 
-	return client
+	return client, nil
 }
 
 func (client *Client) runLoop() {
@@ -254,12 +278,12 @@ func (client *Client) tryGetWait(seq uint) (chan *RPCResponse, bool) {
 }
 
 // HTTPClient create jsonrpc client over http/https
-func HTTPClient(ctx context.Context, serviceURL string, opts ...ClientOpt) (*Client, error) {
-	transport, err := NewHTTPClient(serviceURL)
+func HTTPClient(serviceURL string, opts ...ClientOpt) (*Client, error) {
+	transport, err := NewHTTPClientTransport(serviceURL)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return newClient(ctx, append(opts, ClientTransport(transport))...), nil
+	return newClient(append(opts, ClientTransport(transport))...)
 }

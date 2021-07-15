@@ -42,11 +42,22 @@ type BatchResponses []RPCResponse
 //
 // See: http://www.jsonrpc.org/specification#error_object
 type RPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
+	Code    RPCErrorCode `json:"code"`
+	Message string       `json:"message"`
+	Data    interface{}  `json:"data"`
 }
 
 func (e *RPCError) Error() string {
 	return fmt.Sprintf("RPCError(%d) %s", e.Code, e.Message)
 }
+
+// RPCErrorCode represents jsonrpc error code
+type RPCErrorCode int
+
+const (
+	RPCParseError     RPCErrorCode = -32700
+	RPCInvalidRequest RPCErrorCode = -32600
+	RPCMethodNotFound RPCErrorCode = -32601
+	RPCInvalidParams  RPCErrorCode = -32602
+	RPCInternalError  RPCErrorCode = -32603
+)

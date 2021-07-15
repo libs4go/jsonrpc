@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"net/http"
 	"net/url"
 
 	"github.com/libs4go/errors"
@@ -16,11 +17,12 @@ type TransportCloser interface {
 	Close() error
 }
 
+// HTTP client transport
 type httpClientTransport struct {
 	u *url.URL
 }
 
-func NewHTTPClient(serviceURL string) (Transport, error) {
+func NewHTTPClientTransport(serviceURL string) (Transport, error) {
 	u, err := url.Parse(serviceURL)
 
 	if err != nil {
@@ -38,4 +40,29 @@ func (transport *httpClientTransport) Send([]byte) error {
 
 func (transport *httpClientTransport) Recv() <-chan []byte {
 	return nil
+}
+
+// HTTP server transport
+type httpServerTransport struct {
+}
+
+type HTTPServerTransport interface {
+	Transport
+	http.Handler
+}
+
+func NewHTTPServerTransport() (HTTPServerTransport, error) {
+	return &httpServerTransport{}, nil
+}
+
+func (transport *httpServerTransport) Send([]byte) error {
+	return nil
+}
+
+func (transport *httpServerTransport) Recv() <-chan []byte {
+	return nil
+}
+
+func (transport *httpServerTransport) ServeHTTP(http.ResponseWriter, *http.Request) {
+
 }
