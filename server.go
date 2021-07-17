@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/libs4go/errors"
@@ -37,7 +38,7 @@ func ServerTransport(transport Transport) ServerOpt {
 }
 
 type ResponseWriter interface {
-	Error(code RPCErrorCode, err error)
+	Error(code RPCErrorCode, format string, args ...interface{})
 	Result(value interface{})
 }
 
@@ -46,10 +47,10 @@ type responseWriter struct {
 	result interface{}
 }
 
-func (writer *responseWriter) Error(code RPCErrorCode, err error) {
+func (writer *responseWriter) Error(code RPCErrorCode, format string, args ...interface{}) {
 	writer.err = &RPCError{
 		Code:    code,
-		Message: err.Error(),
+		Message: fmt.Sprintf(format, args...),
 	}
 }
 
