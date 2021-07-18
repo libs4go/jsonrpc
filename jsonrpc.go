@@ -60,4 +60,5 @@ const (
 	RPCMethodNotFound RPCErrorCode = -32601
 	RPCInvalidParams  RPCErrorCode = -32602
 	RPCInternalError  RPCErrorCode = -32603
+	RPCServerError    RPCErrorCode = -32000
 )
