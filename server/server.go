@@ -243,12 +243,15 @@ func (server *serverImpl) reflectCreateServer(wrapped interface{}) error {
 }
 
 func (server *serverImpl) Dispatch(ctx context.Context, buff []byte) ([]byte, error) {
+
 	var rpcRequest *jsonrpc.RPCRequest
 	err := json.Unmarshal(buff, &rpcRequest)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "unmarshal request error")
 	}
+
+	server.D("recv msg {@buff}", rpcRequest)
 
 	server.RLock()
 	defer server.RUnlock()
@@ -274,11 +277,10 @@ func (server *serverImpl) Dispatch(ctx context.Context, buff []byte) ([]byte, er
 		return nil, nil
 	}
 
-	return nil, nil
 }
 
-// NewHTTPServer create http server
-func NewHTTPServer(server interface{}) (*transport.HTTPServer, error) {
+// ServeHTPP create http server
+func ServeHTPP(server interface{}) (*transport.HTTPServer, error) {
 	s, err := New(server)
 
 	if err != nil {
@@ -286,4 +288,15 @@ func NewHTTPServer(server interface{}) (*transport.HTTPServer, error) {
 	}
 
 	return transport.ServeHTTP(s), nil
+}
+
+// ServeWebSocket create websocket server
+func ServeWebSocket(server interface{}) (*transport.WebSocketServer, error) {
+	s, err := New(server)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return transport.ServeWebSocket(s), nil
 }

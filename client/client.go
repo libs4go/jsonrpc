@@ -98,7 +98,7 @@ func clientNullCheck(client *Client) error {
 func New(options ...ClientOpt) (jsonrpc.Client, error) {
 
 	client := &Client{
-		Logger:  slf4go.Get("jsonrpc"),
+		Logger:  slf4go.Get("JSONRPC-CLIENT"),
 		waitQ:   make(map[uint]chan *jsonrpc.RPCResponse),
 		timeout: time.Second * 60,
 		seq:     1,
@@ -286,8 +286,19 @@ func (client *Client) tryGetWait(seq uint) (chan *jsonrpc.RPCResponse, bool) {
 }
 
 // NewHTTPClient create jsonrpc client over http/https
-func NewHTTPClient(serviceURL string, opts ...ClientOpt) (jsonrpc.Client, error) {
+func HTTPConnect(serviceURL string, opts ...ClientOpt) (jsonrpc.Client, error) {
 	transport, err := transport.NewHTTPClientTransport(serviceURL)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return New(append(opts, ClientTrans(transport))...)
+}
+
+// NewWebSocket create jsonrpc client over websocket
+func WebSocketConnect(serviceURL string, opts ...ClientOpt) (jsonrpc.Client, error) {
+	transport, err := transport.NewWebSocketClientTransport(serviceURL)
 
 	if err != nil {
 		return nil, err

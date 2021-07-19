@@ -67,7 +67,7 @@ func TestHttp(t *testing.T) {
 
 	defer slf4go.Sync()
 
-	server, err := NewHTTPServer(&rpcServer{})
+	server, err := ServeHTPP(&rpcServer{})
 
 	require.NoError(t, err)
 
@@ -77,7 +77,44 @@ func TestHttp(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	client, err := client.NewHTTPClient("http://localhost:8080")
+	client, err := client.HTTPConnect("http://localhost:8080")
+
+	require.NoError(t, err)
+
+	var echo string
+
+	err = client.Call(context.Background(), "SayHello", "Hello", 1).Join(&echo)
+
+	require.NoError(t, err)
+
+	require.Equal(t, echo, "Hello")
+
+	err = client.Call(context.Background(), "OptionCall", "Hello").Join(&echo)
+
+	require.NoError(t, err)
+
+	require.Equal(t, echo, "Hello")
+
+	err = client.Call(context.Background(), "ErrorCall").Join(&echo)
+
+	require.Error(t, err)
+}
+
+func TestWebsocket(t *testing.T) {
+
+	defer slf4go.Sync()
+
+	server, err := ServeWebSocket(&rpcServer{})
+
+	require.NoError(t, err)
+
+	go func() {
+		err := http.ListenAndServe(":8080", server)
+
+		require.NoError(t, err)
+	}()
+
+	client, err := client.WebSocketConnect("ws://localhost:8080")
 
 	require.NoError(t, err)
 

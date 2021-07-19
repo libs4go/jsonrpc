@@ -21,7 +21,7 @@ type HTTPServer struct {
 
 func ServeHTTP(server jsonrpc.Server) *HTTPServer {
 	return &HTTPServer{
-		Logger: slf4go.Get("JSONRPC-HTTP-Server"),
+		Logger: slf4go.Get("JSONRPC-TRANSPORT-HTTP-SERVER"),
 		Server: server,
 	}
 }
@@ -41,7 +41,7 @@ func (server *HTTPServer) ServeHTTP(writer http.ResponseWriter, resq *http.Reque
 
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
-		server.E("server internal error %s", err.Error())
+		server.E("server internal error {@err}", err.Error())
 		return
 	}
 
@@ -49,10 +49,9 @@ func (server *HTTPServer) ServeHTTP(writer http.ResponseWriter, resq *http.Reque
 		_, err = writer.Write(respBuff)
 
 		if err != nil {
-			server.E("server resp write error %s", err.Error())
+			server.E("server resp write error {@err}", err.Error())
 		}
 	}
-
 }
 
 // HTTP client transport
