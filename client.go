@@ -10,6 +10,16 @@ import (
 	"github.com/libs4go/slf4go"
 )
 
+type ClientTransport interface {
+	Send([]byte) error
+	Recv() <-chan []byte
+}
+
+type ClientTransportCloser interface {
+	ClientTransport
+	Close() error
+}
+
 type Result struct {
 	client *Client
 	req    *RPCRequest
@@ -45,7 +55,7 @@ func (result *Result) Unmarshal(resultObject interface{}) error {
 type Client struct {
 	sync.Mutex
 	slf4go.Logger
-	Transport Transport                  // Client transport
+	Transport ClientTransport            // Client transport
 	seq       uint                       // request seq
 	waitQ     map[uint]chan *RPCResponse // waitQ
 	timeout   time.Duration              // rpc global timeout
@@ -57,7 +67,7 @@ type Client struct {
 type ClientOpt func(client *Client)
 
 // ClientTransport set client transport
-func ClientTransport(transport Transport) ClientOpt {
+func ClientTrans(transport ClientTransport) ClientOpt {
 	return func(client *Client) {
 		client.Transport = transport
 	}
@@ -166,7 +176,7 @@ func (client *Client) sendResult(result chan *RPCResponse, resp *RPCResponse) {
 }
 
 func (client *Client) clear() {
-	transportCloser, ok := client.Transport.(TransportCloser)
+	transportCloser, ok := client.Transport.(ClientTransportCloser)
 
 	if ok {
 		transportCloser.Close()
@@ -277,13 +287,13 @@ func (client *Client) tryGetWait(seq uint) (chan *RPCResponse, bool) {
 	return result, ok
 }
 
-// HTTPClient create jsonrpc client over http/https
-func HTTPClient(serviceURL string, opts ...ClientOpt) (*Client, error) {
+// NewHTTPClient create jsonrpc client over http/https
+func NewHTTPClient(serviceURL string, opts ...ClientOpt) (*Client, error) {
 	transport, err := NewHTTPClientTransport(serviceURL)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return newClient(append(opts, ClientTransport(transport))...)
+	return newClient(append(opts, ClientTrans(transport))...)
 }

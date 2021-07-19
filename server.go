@@ -4,16 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/libs4go/errors"
 	"github.com/libs4go/slf4go"
 )
 
+type ServerRequest struct {
+	Request        []byte
+	ResponseWriter func([]byte) error
+}
+
+type ServerTransport interface {
+	Recv() <-chan *ServerRequest
+	Close() error
+}
+
 // Server server object
 type Server struct {
 	slf4go.Logger
-	Transport  Transport
+	Transport  ServerTransport
 	Dispatcher Dispatcher
 	ctx        context.Context
 	cancelF    context.CancelFunc
@@ -31,7 +42,7 @@ func ServerContext(ctx context.Context) ServerOpt {
 }
 
 // ServerTransport set server transport
-func ServerTransport(transport Transport) ServerOpt {
+func ServerTrans(transport ServerTransport) ServerOpt {
 	return func(server *Server) {
 		server.Transport = transport
 	}
@@ -69,12 +80,6 @@ func (writer *responseWriter) generate(id uint) *RPCResponse {
 	}
 
 	return resp
-}
-
-// Dispatcher jsonrpc call dispatcher
-type Dispatcher interface {
-	Call(ctx context.Context, req *RPCRequest, resp ResponseWriter)
-	Notification(ctx context.Context, req *RPCNotification)
 }
 
 func serverNullCheck(server *Server) error {
@@ -122,30 +127,30 @@ func (server *Server) runLoop() {
 		select {
 		case <-server.ctx.Done():
 			return
-		case buff, ok := <-server.Transport.Recv():
+		case req, ok := <-server.Transport.Recv():
 			if !ok {
 				return
 			}
 
-			if len(buff) == 0 {
+			if len(req.Request) == 0 {
 				continue
 			}
 
 			var request map[string]interface{}
 
-			err := json.Unmarshal(buff, &request)
+			err := json.Unmarshal(req.Request, &request)
 
 			if err != nil {
-				server.E("unmarshal resp {@buff} err {@err}", buff, err)
+				server.E("unmarshal resp {@buff} err {@err}", req.Request, err)
 				continue
 			}
 
-			go server.dispatch(request)
+			go server.dispatch(req.ResponseWriter, request)
 		}
 	}
 }
 
-func (server *Server) dispatch(request map[string]interface{}) {
+func (server *Server) dispatch(respWriter func([]byte) error, request map[string]interface{}) {
 
 	ctx, cancel := context.WithTimeout(server.ctx, server.timeout)
 
@@ -182,7 +187,7 @@ func (server *Server) dispatch(request map[string]interface{}) {
 			return
 		}
 
-		if err := server.Transport.Send(buff); err != nil {
+		if err := respWriter(buff); err != nil {
 			server.E("send resp {@resp} err {@err}", resp, err)
 			return
 		}
@@ -214,12 +219,18 @@ func (server *Server) Close() error {
 	return nil
 }
 
-func NewHTPPServer(opts ...ServerOpt) (*Server, error) {
+func NewHTPPServer(opts ...ServerOpt) (*Server, http.Handler, error) {
 	transport, err := NewHTTPServerTransport()
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return newServer(append(opts, ServerTransport(transport))...)
+	server, err := newServer(append(opts, ServerTrans(transport))...)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return server, transport, nil
 }

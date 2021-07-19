@@ -10,6 +10,12 @@ import (
 	"github.com/libs4go/errors"
 )
 
+// Dispatcher jsonrpc call dispatcher
+type Dispatcher interface {
+	Call(ctx context.Context, req *RPCRequest, resp ResponseWriter)
+	Notification(ctx context.Context, req *RPCNotification)
+}
+
 type callSite struct {
 	name       string
 	server     reflect.Value
@@ -21,14 +27,18 @@ func newCallSite(server interface{}, name string) *callSite {
 	serverValue := reflect.ValueOf(server)
 	method := serverValue.MethodByName(name)
 
-	methodType := method.Type()
+	var methodType reflect.Type
 
-	if methodType.NumOut() < 1 {
-		method = reflect.Value{}
-	} else {
-		errorInterface := reflect.TypeOf((*error)(nil)).Elem()
-		if !methodType.Out(methodType.NumOut() - 1).Implements(errorInterface) {
+	if method.IsValid() {
+		methodType = method.Type()
+
+		if methodType.NumOut() < 1 {
 			method = reflect.Value{}
+		} else {
+			errorInterface := reflect.TypeOf((*error)(nil)).Elem()
+			if !methodType.Out(methodType.NumOut() - 1).Implements(errorInterface) {
+				method = reflect.Value{}
+			}
 		}
 	}
 
@@ -41,7 +51,7 @@ func newCallSite(server interface{}, name string) *callSite {
 }
 
 func (cs *callSite) Call(ctx context.Context, req *RPCRequest, resp ResponseWriter) {
-	if cs.method.IsZero() {
+	if !cs.method.IsValid() {
 		resp.Error(RPCInvalidRequest, "invalid rpc call %s", cs.name)
 		return
 	}
