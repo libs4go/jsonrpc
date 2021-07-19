@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/libs4go/errors"
@@ -24,7 +23,6 @@ type ServerTransport interface {
 // Server server object
 type Server struct {
 	slf4go.Logger
-	Transport  ServerTransport
 	Dispatcher Dispatcher
 	ctx        context.Context
 	cancelF    context.CancelFunc
@@ -38,13 +36,6 @@ type ServerOpt func(server *Server)
 func ServerContext(ctx context.Context) ServerOpt {
 	return func(server *Server) {
 		server.ctx = ctx
-	}
-}
-
-// ServerTransport set server transport
-func ServerTrans(transport ServerTransport) ServerOpt {
-	return func(server *Server) {
-		server.Transport = transport
 	}
 }
 
@@ -83,9 +74,6 @@ func (writer *responseWriter) generate(id uint) *RPCResponse {
 }
 
 func serverNullCheck(server *Server) error {
-	if server.Transport == nil {
-		return errors.Wrap(ErrTransport, "expect transport ops")
-	}
 
 	if server.Dispatcher == nil {
 		return errors.Wrap(ErrDispatcher, "expect dispatcher ops")
@@ -117,53 +105,25 @@ func newServer(opts ...ServerOpt) (*Server, error) {
 	server.ctx = newCtx
 	server.cancelF = cancelF
 
-	go server.runLoop()
-
 	return server, nil
 }
 
-func (server *Server) runLoop() {
-	for {
-		select {
-		case <-server.ctx.Done():
-			return
-		case req, ok := <-server.Transport.Recv():
-			if !ok {
-				return
-			}
+func (server *Server) Dispatch(respWriter func([]byte) error, buff []byte) {
 
-			if len(req.Request) == 0 {
-				continue
-			}
+	var request map[string]interface{}
 
-			var request map[string]interface{}
+	err := json.Unmarshal(buff, &request)
 
-			err := json.Unmarshal(req.Request, &request)
-
-			if err != nil {
-				server.E("unmarshal resp {@buff} err {@err}", req.Request, err)
-				continue
-			}
-
-			go server.dispatch(req.ResponseWriter, request)
-		}
+	if err != nil {
+		server.E("unmarshal request error: {@err}", err)
+		return
 	}
-}
-
-func (server *Server) dispatch(respWriter func([]byte) error, request map[string]interface{}) {
 
 	ctx, cancel := context.WithTimeout(server.ctx, server.timeout)
 
 	defer cancel()
 
 	if _, ok := request["id"]; ok {
-
-		buff, err := json.Marshal(request)
-
-		if err != nil {
-			server.E("marshal req {@req} err {@err}", request, err)
-			return
-		}
 
 		var req *RPCRequest
 
@@ -195,13 +155,6 @@ func (server *Server) dispatch(respWriter func([]byte) error, request map[string
 		return
 	}
 
-	buff, err := json.Marshal(request)
-
-	if err != nil {
-		server.E("marshal notification {@req} err {@err}", request, err)
-		return
-	}
-
 	var notification *RPCNotification
 
 	err = json.Unmarshal(buff, &notification)
@@ -219,18 +172,13 @@ func (server *Server) Close() error {
 	return nil
 }
 
-func NewHTPPServer(opts ...ServerOpt) (*Server, http.Handler, error) {
-	transport, err := NewHTTPServerTransport()
+func NewHTPPServer(opts ...ServerOpt) (*HTTPServer, error) {
+
+	server, err := newServer(opts...)
 
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	server, err := newServer(append(opts, ServerTrans(transport))...)
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return server, transport, nil
+	return ServeHTTP(server), nil
 }

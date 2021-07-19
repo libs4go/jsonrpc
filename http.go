@@ -66,6 +66,7 @@ func (transport *httpClientTransport) Close() {
 }
 
 func (transport *httpClientTransport) Send(body []byte) (err error) {
+
 	request, err := http.NewRequest("POST", transport.u.String(), bytes.NewReader(body))
 	if err != nil {
 		return errors.Wrap(err, "create post request error")
@@ -78,11 +79,10 @@ func (transport *httpClientTransport) Send(body []byte) (err error) {
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Accept", "application/json")
 
-	transport.client.Do(request)
-
 	httpResponse, err := transport.client.Do(request)
 
 	if err != nil {
+		println(err.Error())
 		return err
 	}
 
@@ -109,43 +109,17 @@ func (transport *httpClientTransport) Recv() <-chan []byte {
 	return transport.recv
 }
 
-type HTTPServerTransport interface {
-	ServerTransport
-	http.Handler
+type HTTPServer struct {
+	*Server
 }
 
-// HTTP server transport
-type httpServerTransport struct {
-	recv chan *ServerRequest
-}
-
-type HTTPServerTransportOp func(*httpServerTransport)
-
-func NewHTTPServerTransport(ops ...HTTPServerTransportOp) (HTTPServerTransport, error) {
-	t := &httpServerTransport{}
-
-	for _, op := range ops {
-		op(t)
+func ServeHTTP(server *Server) *HTTPServer {
+	return &HTTPServer{
+		Server: server,
 	}
-
-	if t.recv == nil {
-		t.recv = make(chan *ServerRequest, 200)
-	}
-
-	return t, nil
 }
 
-func (transport *httpServerTransport) Close() error {
-	close(transport.recv)
-
-	return nil
-}
-
-func (transport *httpServerTransport) Recv() <-chan *ServerRequest {
-	return transport.recv
-}
-
-func (transport *httpServerTransport) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+func (server *HTTPServer) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if e := recover(); e != nil {
 			writer.WriteHeader(http.StatusServiceUnavailable)
@@ -162,12 +136,10 @@ func (transport *httpServerTransport) ServeHTTP(writer http.ResponseWriter, req 
 		return
 	}
 
-	transport.recv <- &ServerRequest{
-		Request: buff,
-		ResponseWriter: func(b []byte) error {
-			_, err := writer.Write(b)
+	server.Dispatch(func(b []byte) error {
+		_, err := writer.Write(b)
+		println(string(b))
 
-			return err
-		},
-	}
+		return err
+	}, buff)
 }
