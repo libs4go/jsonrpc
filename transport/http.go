@@ -1,7 +1,8 @@
-package jsonrpc
+package transport
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -9,7 +10,50 @@ import (
 	"time"
 
 	"github.com/libs4go/errors"
+	"github.com/libs4go/jsonrpc"
+	"github.com/libs4go/slf4go"
 )
+
+type HTTPServer struct {
+	slf4go.Logger
+	jsonrpc.Server
+}
+
+func ServeHTTP(server jsonrpc.Server) *HTTPServer {
+	return &HTTPServer{
+		Logger: slf4go.Get("JSONRPC-HTTP-Server"),
+		Server: server,
+	}
+}
+
+func (server *HTTPServer) ServeHTTP(writer http.ResponseWriter, resq *http.Request) {
+	defer resq.Body.Close()
+
+	buff, err := io.ReadAll(resq.Body)
+
+	if err != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		writer.Write([]byte("read http body error"))
+		return
+	}
+
+	respBuff, err := server.Dispatch(context.Background(), buff)
+
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		server.E("server internal error %s", err.Error())
+		return
+	}
+
+	if len(respBuff) != 0 {
+		_, err = writer.Write(respBuff)
+
+		if err != nil {
+			server.E("server resp write error %s", err.Error())
+		}
+	}
+
+}
 
 // HTTP client transport
 type httpClientTransport struct {
@@ -21,13 +65,13 @@ type httpClientTransport struct {
 
 type HTTPClientOps func(*httpClientTransport)
 
-func RequestHeaders(headers map[string]string) HTTPClientOps {
+func HTTPHeaders(headers map[string]string) HTTPClientOps {
 	return func(hct *httpClientTransport) {
 		hct.customHeaders = headers
 	}
 }
 
-func NewHTTPClientTransport(serviceURL string, ops ...HTTPClientOps) (ClientTransport, error) {
+func NewHTTPClientTransport(serviceURL string, ops ...HTTPClientOps) (jsonrpc.ClientTransport, error) {
 	u, err := url.Parse(serviceURL)
 
 	if err != nil {
@@ -65,7 +109,7 @@ func (transport *httpClientTransport) Close() {
 	close(transport.recv)
 }
 
-func (transport *httpClientTransport) Send(body []byte) (err error) {
+func (transport *httpClientTransport) Send(ctx context.Context, body []byte) (err error) {
 
 	request, err := http.NewRequest("POST", transport.u.String(), bytes.NewReader(body))
 	if err != nil {
@@ -107,39 +151,4 @@ func (transport *httpClientTransport) Send(body []byte) (err error) {
 
 func (transport *httpClientTransport) Recv() <-chan []byte {
 	return transport.recv
-}
-
-type HTTPServer struct {
-	*Server
-}
-
-func ServeHTTP(server *Server) *HTTPServer {
-	return &HTTPServer{
-		Server: server,
-	}
-}
-
-func (server *HTTPServer) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
-	defer func() {
-		if e := recover(); e != nil {
-			writer.WriteHeader(http.StatusServiceUnavailable)
-			writer.Write([]byte("server closed"))
-		}
-	}()
-
-	defer req.Body.Close()
-
-	buff, err := io.ReadAll(req.Body)
-
-	if err != nil {
-		writer.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	server.Dispatch(func(b []byte) error {
-		_, err := writer.Write(b)
-		println(string(b))
-
-		return err
-	}, buff)
 }

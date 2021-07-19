@@ -1,4 +1,4 @@
-package jsonrpc
+package client
 
 import (
 	"context"
@@ -7,26 +7,22 @@ import (
 	"time"
 
 	"github.com/libs4go/errors"
+	"github.com/libs4go/jsonrpc"
+	"github.com/libs4go/jsonrpc/transport"
 	"github.com/libs4go/slf4go"
 )
 
-type ClientTransport interface {
-	Send([]byte) error
-	Recv() <-chan []byte
-}
-
-type ClientTransportCloser interface {
-	ClientTransport
-	Close() error
-}
-
 type Result struct {
 	client *Client
-	req    *RPCRequest
+	req    *jsonrpc.RPCRequest
 	ctx    context.Context
 }
 
-func (result *Result) Unmarshal(resultObject interface{}) error {
+func (result *Result) Cancel() {
+
+}
+
+func (result *Result) Join(resultObject interface{}) error {
 	resp, err := result.client.send(result.ctx, result.req)
 
 	if err != nil {
@@ -55,10 +51,10 @@ func (result *Result) Unmarshal(resultObject interface{}) error {
 type Client struct {
 	sync.Mutex
 	slf4go.Logger
-	Transport ClientTransport            // Client transport
-	seq       uint                       // request seq
-	waitQ     map[uint]chan *RPCResponse // waitQ
-	timeout   time.Duration              // rpc global timeout
+	Transport jsonrpc.ClientTransport            // Client transport
+	seq       uint                               // request seq
+	waitQ     map[uint]chan *jsonrpc.RPCResponse // waitQ
+	timeout   time.Duration                      // rpc global timeout
 	ctx       context.Context
 	cancelF   context.CancelFunc
 }
@@ -67,7 +63,7 @@ type Client struct {
 type ClientOpt func(client *Client)
 
 // ClientTransport set client transport
-func ClientTrans(transport ClientTransport) ClientOpt {
+func ClientTrans(transport jsonrpc.ClientTransport) ClientOpt {
 	return func(client *Client) {
 		client.Transport = transport
 	}
@@ -89,7 +85,7 @@ func ClientTimeout(duration time.Duration) ClientOpt {
 
 func clientNullCheck(client *Client) error {
 	if client.Transport == nil {
-		return errors.Wrap(ErrTransport, "expect transport ops")
+		return errors.Wrap(jsonrpc.ErrTransport, "expect transport ops")
 	}
 
 	if client.ctx == nil {
@@ -99,11 +95,11 @@ func clientNullCheck(client *Client) error {
 	return nil
 }
 
-func newClient(options ...ClientOpt) (*Client, error) {
+func New(options ...ClientOpt) (jsonrpc.Client, error) {
 
 	client := &Client{
 		Logger:  slf4go.Get("jsonrpc"),
-		waitQ:   make(map[uint]chan *RPCResponse),
+		waitQ:   make(map[uint]chan *jsonrpc.RPCResponse),
 		timeout: time.Second * 60,
 		seq:     1,
 	}
@@ -143,7 +139,7 @@ func (client *Client) runLoop() {
 				continue
 			}
 
-			var resp *RPCResponse
+			var resp *jsonrpc.RPCResponse
 
 			err := json.Unmarshal(buff, &resp)
 
@@ -151,6 +147,8 @@ func (client *Client) runLoop() {
 				client.E("unmarshal resp {@buff} err {@err}", buff, err)
 				continue
 			}
+
+			client.D("recv remote message {@msg}", resp)
 
 			result, ok := client.tryGetWait(resp.ID)
 
@@ -165,7 +163,7 @@ func (client *Client) runLoop() {
 
 }
 
-func (client *Client) sendResult(result chan *RPCResponse, resp *RPCResponse) {
+func (client *Client) sendResult(result chan *jsonrpc.RPCResponse, resp *jsonrpc.RPCResponse) {
 	defer func() {
 		if err := recover(); err != nil {
 			client.E("send resp {@resp} error {@err}", resp, err)
@@ -176,7 +174,7 @@ func (client *Client) sendResult(result chan *RPCResponse, resp *RPCResponse) {
 }
 
 func (client *Client) clear() {
-	transportCloser, ok := client.Transport.(ClientTransportCloser)
+	transportCloser, ok := client.Transport.(jsonrpc.ClientTransportCloser)
 
 	if ok {
 		transportCloser.Close()
@@ -188,7 +186,7 @@ func (client *Client) Close() error {
 	return nil
 }
 
-func (client *Client) Call(ctx context.Context, method string, args ...interface{}) *Result {
+func (client *Client) Call(ctx context.Context, method string, args ...interface{}) jsonrpc.Reply {
 
 	var p interface{}
 	if len(args) != 0 {
@@ -199,7 +197,7 @@ func (client *Client) Call(ctx context.Context, method string, args ...interface
 		p = empty
 	}
 
-	req := &RPCRequest{
+	req := &jsonrpc.RPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  p,
@@ -213,8 +211,8 @@ func (client *Client) Call(ctx context.Context, method string, args ...interface
 }
 
 // Send notifcation message
-func (client *Client) Notification(method string, args ...interface{}) error {
-	req := &RPCNotification{
+func (client *Client) Notification(ctx context.Context, method string, args ...interface{}) error {
+	req := &jsonrpc.RPCNotification{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  args,
@@ -226,19 +224,19 @@ func (client *Client) Notification(method string, args ...interface{}) error {
 		return errors.Wrap(err, "marshal request error")
 	}
 
-	return client.Transport.Send(buff)
+	return client.Transport.Send(ctx, buff)
 }
 
-func (client *Client) send(ctx context.Context, req *RPCRequest) (*RPCResponse, error) {
+func (client *Client) send(ctx context.Context, req *jsonrpc.RPCRequest) (*jsonrpc.RPCResponse, error) {
 
-	result := make(chan *RPCResponse)
+	result := make(chan *jsonrpc.RPCResponse)
 	client.Lock()
 	seq := client.seq
 	client.waitQ[client.seq] = result
 	client.seq = seq + 1
 	client.Unlock()
 
-	req.ID = uint(seq)
+	req.ID = &seq
 
 	client.D("jsonrpc call {@request}", req)
 
@@ -248,7 +246,7 @@ func (client *Client) send(ctx context.Context, req *RPCRequest) (*RPCResponse, 
 		return nil, errors.Wrap(err, "marshal request error")
 	}
 
-	if err := client.Transport.Send(buff); err != nil {
+	if err := client.Transport.Send(ctx, buff); err != nil {
 		client.tryGetWait(seq)
 		close(result)
 		return nil, err
@@ -261,10 +259,10 @@ func (client *Client) send(ctx context.Context, req *RPCRequest) (*RPCResponse, 
 	select {
 	case <-client.ctx.Done():
 		client.tryGetWait(seq)
-		return nil, errors.Wrap(ErrClose, "cancel RPC %d by closing client", seq)
+		return nil, errors.Wrap(jsonrpc.ErrClose, "cancel RPC %d by closing client", seq)
 	case <-timer.C:
 		client.tryGetWait(seq)
-		return nil, errors.Wrap(ErrTimeout, "RPC %d timeout", seq)
+		return nil, errors.Wrap(jsonrpc.ErrTimeout, "RPC %d timeout", seq)
 	case <-ctx.Done():
 		client.tryGetWait(seq)
 		return nil, errors.Wrap(ctx.Err(), "RPC %d canceled", seq)
@@ -274,7 +272,7 @@ func (client *Client) send(ctx context.Context, req *RPCRequest) (*RPCResponse, 
 	}
 }
 
-func (client *Client) tryGetWait(seq uint) (chan *RPCResponse, bool) {
+func (client *Client) tryGetWait(seq uint) (chan *jsonrpc.RPCResponse, bool) {
 	client.Lock()
 	defer client.Unlock()
 
@@ -288,12 +286,12 @@ func (client *Client) tryGetWait(seq uint) (chan *RPCResponse, bool) {
 }
 
 // NewHTTPClient create jsonrpc client over http/https
-func NewHTTPClient(serviceURL string, opts ...ClientOpt) (*Client, error) {
-	transport, err := NewHTTPClientTransport(serviceURL)
+func NewHTTPClient(serviceURL string, opts ...ClientOpt) (jsonrpc.Client, error) {
+	transport, err := transport.NewHTTPClientTransport(serviceURL)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return newClient(append(opts, ClientTrans(transport))...)
+	return New(append(opts, ClientTrans(transport))...)
 }

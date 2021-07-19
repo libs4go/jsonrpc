@@ -1,6 +1,9 @@
 package jsonrpc
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // RPCRequest represents a jsonrpc request object.
 //
@@ -9,7 +12,7 @@ type RPCRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
-	ID      uint        `json:"id"`
+	ID      *uint       `json:"id,omitempty"`
 }
 
 // RPCNotification represents a jsonrpc notification object.
@@ -44,7 +47,7 @@ type BatchResponses []RPCResponse
 type RPCError struct {
 	Code    RPCErrorCode `json:"code"`
 	Message string       `json:"message"`
-	Data    interface{}  `json:"data"`
+	Data    interface{}  `json:"data,omitempty"`
 }
 
 func (e *RPCError) Error() string {
@@ -62,3 +65,29 @@ const (
 	RPCInternalError  RPCErrorCode = -32603
 	RPCServerError    RPCErrorCode = -32000
 )
+
+type Reply interface {
+	Join(result interface{}) error
+	Cancel()
+}
+
+// Client jsonrpc Client interface
+type Client interface {
+	Call(ctx context.Context, method string, args ...interface{}) Reply
+	Notification(ctx context.Context, method string, args ...interface{}) error
+}
+
+// ClientTransport client underlying transport protocol
+type ClientTransport interface {
+	Send(ctx context.Context, buff []byte) error
+	Recv() <-chan []byte
+}
+
+type ClientTransportCloser interface {
+	ClientTransport
+	Close() error
+}
+
+type Server interface {
+	Dispatch(context.Context, []byte) ([]byte, error)
+}
