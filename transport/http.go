@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/libs4go/errors"
 	"github.com/libs4go/jsonrpc"
@@ -78,22 +76,9 @@ func NewHTTPClientTransport(serviceURL string, ops ...HTTPClientOps) (jsonrpc.Cl
 	}
 
 	transport := &httpClientTransport{
-		u:    u,
-		recv: make(chan []byte, 100),
-		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				DialContext: (&net.Dialer{
-					Timeout:   30 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 40,
-				IdleConnTimeout:     time.Duration(20) * time.Second,
-			},
-
-			Timeout: 20 * time.Second,
-		},
+		u:             u,
+		recv:          make(chan []byte, 100),
+		client:        http.DefaultClient,
 		customHeaders: make(map[string]string),
 	}
 
